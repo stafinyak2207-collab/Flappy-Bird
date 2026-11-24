@@ -1,126 +1,98 @@
-import pygame
+from pygame import *
 from random import randint
+import sounddevice as sd 
+import numpy as np
 
-pygame.init()
+sr = 16000
+block = 256
+mic_level = 0.0
 
-WIDTH, HEIGHT = 1200, 800
-window = pygame.display.set_mode((WIDTH, HEIGHT))
-clock = pygame.time.Clock()
+def audio_cb(indata, frames, time, status):
+    global mic_level
+    if status:
+        return
+    rms = float(np.sqrt(np.mean(indata**2)))
+    mic_level = 0.85 * mic_level + 0.15 * rms
 
-player_rect = pygame.Rect(150, HEIGHT // 2 - 100, 100, 100)
+init()
+window_size = 1200, 800
+window = display.set_mode(window_size)
+clock = time.Clock()
 
-GREEN = (0, 200, 0)
-RED = (255, 0, 0)
-BLACK = (0, 0, 0)
+player_rect = Rect(150, window_size[1]//2-100, 100, 100)
 
-
-def generate_pipes(count,
-                   pipe_width=140,
-                   gap=280,
-                   min_height=50,
-                   max_height=400,
-                   distance=650):
+def generate_pipes(count, pipe_width=140, gap=280, min_height=50, max_height=440, distance=650):
     pipes = []
-
-    start_x = WIDTH
-
+    start_x = window_size[0]
     for i in range(count):
         height = randint(min_height, max_height)
-
-        top_pipe = pygame.Rect(
-            start_x,
-            0,
-            pipe_width,
-            height
-        )
-
-        bottom_pipe = pygame.Rect(
-            start_x,
-            height + gap,
-            pipe_width,
-            HEIGHT - (height + gap)
-        )
-
-        pipes.append((top_pipe, bottom_pipe))
+        top_pipe = Rect(start_x, 0, pipe_width, height)
+        bottom_pipe = Rect(start_x, height + gap, pipe_width, window_size[1] - (height + gap))
+        pipes.extend([top_pipe, bottom_pipe])
         start_x += distance
-
     return pipes
 
-
 pipes = generate_pipes(150)
-
-font = pygame.font.Font(None, 100)
-
+main_font = font.Font(None, 100)
 score = 0
 lose = False
-y_vel = 2
+y_vel = 0.0
+wait = 40
+gravity = 0.6  
 
+THRESH = 0.010
+IMPULSE = -8.0
 
-running = True
+with sd.InputStream(samplerate=sr, channels=1, blocksize=block, callback=audio_cb):
+    while True:
+        for e in event.get():
+            if e.type == QUIT:
+                quit()
 
-while running:
+        if mic_level > THRESH:
+            y_vel = IMPULSE
+        y_vel += gravity
+        player_rect.y += int(y_vel)
 
-    for event in pygame.event.get():
-        if event.type == pygame.QUIT:
-            running = False
+        window.fill('sky blue')
+        draw.rect(window, 'red', player_rect)
 
-    window.fill("sky blue")
+        for pie in pipes[:]:
+            if not lose:
+                pie.x -= 10
+            draw.rect(window, 'green', pie)
+            if pie.x <= -100:
+                pipes.remove(pie)
+                score += 0.5
+            if player_rect.colliderect(pie):
+                lose = True
 
-    pygame.draw.rect(window, RED, player_rect)
+        score_text = main_font.render(f'{int(score)}', 1, 'black')
+        window.blit(score_text, (window_size[0]//2 - score_text.get_rect().w/2, 40))
 
-    for top_pipe, bottom_pipe in pipes:
-        pygame.draw.rect(window, GREEN, top_pipe)
-        pygame.draw.rect(window, GREEN, bottom_pipe)
+        display.update()
+        clock.tick(60)
 
-        if top_pipe.x == 100:
-            score += 0.9
+        keys = key.get_pressed()
+        if keys[K_r] and lose:
+            lose = False
+            score = 0
+            pipes = generate_pipes(150)
+            player_rect.y = window_size[1]//2-100
+            y_vel = 0.0
 
-        if (
-            player_rect.colliderect(top_pipe)
-            or player_rect.colliderect(bottom_pipe)
-        ):
-            lose = True
+        if player_rect.bottom > window_size[1]:
+            player_rect.bottom = window_size[1]
+            y_vel = 0.0
+        if player_rect.top < 0:
+            player_rect.top = 0
+            if y_vel < 0:
+                y_vel = 0.0
 
-    if len(pipes) < 8:
-        pipes += generate_pipes(150)
-
-    score_text = font.render(
-        f"{int(score)}",
-        True,
-        BLACK
-    )
-
-    window.blit(
-        score_text,
-        score_text.get_rect(center=(WIDTH // 2, 48))
-    )
-
-    keys = pygame.key.get_pressed()
-
-    if keys[pygame.K_w] and not lose:
-        player_rect.y -= 15
-
-    if keys[pygame.K_s] and not lose:
-        player_rect.y += 15
-
-    if keys[pygame.K_r] and lose:
-        score = 0
-        lose = False
-        pipes = generate_pipes(150)
-
-        player_rect.y = HEIGHT // 2 - 100
-        y_vel = 2
-
-    if player_rect.y + player_rect.height > HEIGHT:
-        lose = True
-
-    if not lose:
-        for top_pipe, bottom_pipe in pipes:
-            top_pipe.x -= 10
-            bottom_pipe.x -= 10
-
-
-    pygame.display.update()
-    clock.tick(60)
-
-pygame.quit()
+        if lose and wait > 1:
+            for pie in pipes:
+                pie.x += 8
+            wait -= 1
+        else:
+            lose = False
+            wait = 40
